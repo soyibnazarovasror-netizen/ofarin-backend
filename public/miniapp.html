@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>Ofarin — Kalendar</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --gold: #c9a96e;
+      --gold-light: #e8c98a;
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface2: #222222;
+      --border: #2e2e2e;
+      --text: #f0ece4;
+      --muted: #888;
+      --green: #4caf7d;
+      --red: #e05555;
+      --yellow: #e0b04a;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      padding-bottom: 2rem;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.25rem 0.75rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      color: var(--gold);
+    }
+    .section-tabs {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .tab {
+      padding: 0.35rem 1rem;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab.active {
+      background: var(--gold);
+      color: #0f0f0f;
+      border-color: var(--gold);
+      font-weight: 600;
+    }
+
+    /* ── CALENDAR NAV ── */
+    .cal-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 1.25rem;
+    }
+    .cal-nav button {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--gold);
+      font-size: 1.1rem;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .cal-month {
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--text);
+    }
+
+    /* ── CALENDAR GRID ── */
+    .cal-wrap {
+      padding: 0 1rem 1rem;
+    }
+    .cal-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+      padding: 0 0.25rem;
+    }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+    }
+    .cal-day {
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+      border: 1.5px solid transparent;
+      background: var(--surface2);
+    }
+    .cal-day.empty {
+      background: transparent;
+      border-color: transparent;
+      cursor: default;
+    }
+    .cal-day.past {
+      background: transparent;
+      color: var(--border);
+      cursor: default;
+      border-color: transparent;
+    }
+    .cal-day.today {
+      border-color: var(--gold) !important;
+    }
+    .cal-day.free {
+      background: var(--surface2);
+      color: var(--text);
+    }
+    .cal-day.free:hover {
+      background: var(--surface);
+      border-color: var(--border);
+    }
+
+    /* half = bitta slot band */
+    .cal-day.half {
+      background: rgba(224,176,74,0.12);
+      border-color: rgba(224,176,74,0.35);
+      color: var(--yellow);
+    }
+    /* full = ikkala slot band */
+    .cal-day.full {
+      background: rgba(224,85,85,0.12);
+      border-color: rgba(224,85,85,0.35);
+      color: var(--red);
+    }
+    /* selected */
+    .cal-day.selected {
+      background: var(--gold) !important;
+      color: #0f0f0f !important;
+      border-color: var(--gold) !important;
+      font-weight: 700;
+    }
+
+    /* Slot dots */
+    .slot-dots {
+      display: flex;
+      gap: 2px;
+      margin-top: 2px;
+    }
+    .dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+    }
+    .dot.morning { background: var(--yellow); }
+    .dot.evening { background: var(--gold); }
+    .dot.free-dot { background: var(--green); opacity: 0.5; }
+
+    /* ── LEGEND ── */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      padding: 0 1.25rem 1rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      align-items: center;
+    }
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .leg-box {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+    .leg-box.free  { background: var(--surface2); border: 1px solid var(--border); }
+    .leg-box.half  { background: rgba(224,176,74,0.25); border: 1px solid rgba(224,176,74,0.5); }
+    .leg-box.full  { background: rgba(224,85,85,0.25);  border: 1px solid rgba(224,85,85,0.5);  }
+    .leg-box.today { border: 1.5px solid var(--gold); background: transparent; }
+
+    /* ── DETAIL PANEL ── */
+    .detail-panel {
+      margin: 0 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: none;
+    }
+    .detail-panel.open { display: block; }
+    .detail-header {
+      padding: 0.9rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .detail-date {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--gold);
+    }
+    .detail-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 0.2rem 0.4rem;
+    }
+
+    .slot-row {
+      padding: 0.9rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    .slot-row:last-child { border-bottom: none; }
+    .slot-icon { font-size: 1.3rem; flex-shrink: 0; margin-top: 0.1rem; }
+    .slot-info { flex: 1; }
+    .slot-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+    }
+    .slot-time {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    .slot-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.6rem;
+      border-radius: 20px;
+    }
+    .badge-free     { background: rgba(76,175,125,0.15); color: var(--green); border: 1px solid rgba(76,175,125,0.3); }
+    .badge-pending  { background: rgba(201,169,110,0.15); color: var(--gold); border: 1px solid rgba(201,169,110,0.3); }
+    .badge-confirmed{ background: rgba(76,175,125,0.15); color: var(--green); border: 1px solid rgba(76,175,125,0.3); }
+    .badge-rejected { background: rgba(224,85,85,0.15);  color: var(--red);   border: 1px solid rgba(224,85,85,0.3); }
+
+    .booking-mini {
+      margin-top: 0.6rem;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 0.7rem 0.85rem;
+      font-size: 0.78rem;
+    }
+    .booking-mini-name { font-weight: 600; margin-bottom: 0.2rem; }
+    .booking-mini-detail { color: var(--muted); line-height: 1.6; }
+
+    /* ── OFFLINE SECTION ── */
+    .offline-section {
+      padding: 3rem 1.25rem;
+      text-align: center;
+      display: none;
+    }
+    .offline-section.open { display: block; }
+    .offline-icon { font-size: 3rem; margin-bottom: 1rem; }
+    .offline-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .offline-desc { color: var(--muted); font-size: 0.85rem; line-height: 1.7; }
+
+    /* ── LOADING ── */
+    .loading {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <span class="logo">OFARIN</span>
+    <div class="section-tabs">
+      <button class="tab active" id="tab-online" onclick="switchTab('online')">📅 Online</button>
+      <button class="tab" id="tab-offline" onclick="switchTab('offline')">📋 Offline</button>
+    </div>
+  </div>
+</div>
+
+<!-- ONLINE SECTION -->
+<div id="section-online">
+  <!-- Calendar Nav -->
+  <div class="cal-nav">
+    <button onclick="prevMonth()">‹</button>
+    <span class="cal-month" id="calMonthLabel"></span>
+    <button onclick="nextMonth()">›</button>
+  </div>
+
+  <!-- Weekdays -->
+  <div class="cal-wrap">
+    <div class="cal-weekdays">
+      <span>Du</span><span>Se</span><span>Ch</span><span>Pa</span><span>Ju</span><span>Sh</span><span>Ya</span>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="leg-item"><div class="leg-box free"></div><span>Bo'sh</span></div>
+    <div class="leg-item"><div class="leg-box half"></div><span>1 slot band</span></div>
+    <div class="leg-item"><div class="leg-box full"></div><span>To'liq band</span></div>
+    <div class="leg-item"><div class="leg-box today"></div><span>Bugun</span></div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+      <span class="detail-date" id="detailDate"></span>
+      <button class="detail-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<!-- OFFLINE SECTION -->
+<div class="offline-section" id="section-offline">
+  <div class="offline-icon">📋</div>
+  <div class="offline-title">Offline Bronlar</div>
+  <div class="offline-desc">Bu bo'lim hozircha bo'sh.<br/>Keyinchalik qo'shiladi.</div>
+</div>
+
+<script>
+  // Telegram Web App init
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    tg.setHeaderColor('#0f0f0f');
+    tg.setBackgroundColor('#0f0f0f');
+  }
+
+  // ── State ──
+  let bookings = [];
+  let currentYear, currentMonth;
+  let selectedDate = null;
+  const SERVER = window.location.origin;
+
+  const MONTHS_UZ = ['Yanvar','Fevral','Mart','Aprel','May','Iyun','Iyul','Avgust','Sentabr','Oktabr','Noyabr','Dekabr'];
+  const EVENT_LABELS = {
+    wedding: "💍 To'y",
+    birthday: "🎂 Tug'ilgan kun",
+    yubiley: "🌟 Yubiley",
+    haj: "🕌 Haj To'yi",
+    banket: "🥂 Banket"
+  };
+
+  // ── Fetch bookings ──
+  async function fetchBookings() {
+    try {
+      const res = await fetch(`${SERVER}/api/bookings`);
+      bookings = await res.json();
+      renderCalendar();
+    } catch(e) {
+      console.error(e);
+      renderCalendar();
+    }
+  }
+
+  // ── Tab switch ──
+  function switchTab(tab) {
+    document.getElementById('section-online').style.display  = tab === 'online'  ? 'block' : 'none';
+    document.getElementById('section-offline').style.display = tab === 'offline' ? 'block' : 'none';
+    document.getElementById('tab-online').classList.toggle('active',  tab === 'online');
+    document.getElementById('tab-offline').classList.toggle('active', tab === 'offline');
+    if (tab === 'offline') {
+      document.getElementById('section-offline').classList.add('open');
+    }
+  }
+
+  // ── Calendar ──
+  function getSlotStatus(dateStr) {
+    const day = bookings.filter(b => b.date === dateStr && b.status !== 'rejected');
+    const m = day.some(b => b.slot === 'morning');
+    const e = day.some(b => b.slot === 'evening');
+    if (m && e) return 'full';
+    if (m || e) return 'half';
+    return 'free';
+  }
+
+  function renderCalendar() {
+    const grid = document.getElementById('calGrid');
+    const label = document.getElementById('calMonthLabel');
+    if (!grid) return;
+
+    label.textContent = MONTHS_UZ[currentMonth] + ' ' + currentYear;
+    grid.innerHTML = '';
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    let startDow = new Date(currentYear, currentMonth, 1).getDay();
+    startDow = startDow === 0 ? 6 : startDow - 1;
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    for (let i = 0; i < startDow; i++) {
+      const el = document.createElement('div');
+      el.className = 'cal-day empty';
+      grid.appendChild(el);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(currentYear, currentMonth, d);
+      const dateStr = fmt(currentYear, currentMonth + 1, d);
+      const status  = getSlotStatus(dateStr);
+      const isPast  = dateObj < today;
+      const isToday = dateObj.getTime() === today.getTime();
+      const isSel   = selectedDate === dateStr;
+
+      const el = document.createElement('div');
+      let cls = 'cal-day';
+      if (isPast)        cls += ' past';
+      else if (isSel)    cls += ' selected';
+      else               cls += ' ' + status;
+      if (isToday)       cls += ' today';
+      el.className = cls;
+
+      // Number
+      const num = document.createElement('span');
+      num.textContent = d;
+      el.appendChild(num);
+
+      // Dots (only non-past, non-selected)
+      if (!isPast) {
+        const dayBookings = bookings.filter(b => b.date === dateStr && b.status !== 'rejected');
+        const hasMorning = dayBookings.some(b => b.slot === 'morning');
+        const hasEvening = dayBookings.some(b => b.slot === 'evening');
+
+        if (hasMorning || hasEvening) {
+          const dots = document.createElement('div');
+          dots.className = 'slot-dots';
+          if (hasMorning) { const d2 = document.createElement('div'); d2.className='dot morning'; dots.appendChild(d2); }
+          if (hasEvening) { const d2 = document.createElement('div'); d2.className='dot evening'; dots.appendChild(d2); }
+          el.appendChild(dots);
+        }
+      }
+
+      if (!isPast) {
+        el.onclick = () => showDetail(dateStr, el);
+      }
+      grid.appendChild(el);
+    }
+
+    // Close detail if open date not in this month
+    if (selectedDate) closeDetail();
+  }
+
+  function fmt(y, m, d) {
+    return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+  }
+
+  function prevMonth() {
+    currentMonth--;
+    if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+    renderCalendar();
+  }
+  function nextMonth() {
+    currentMonth++;
+    if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+    renderCalendar();
+  }
+
+  // ── Detail panel ──
+  function showDetail(dateStr, cell) {
+    // Deselect old
+    document.querySelectorAll('.cal-day.selected').forEach(c => {
+      const status = getSlotStatus(c.dataset?.date || '');
+      c.classList.remove('selected');
+    });
+
+    selectedDate = dateStr;
+    cell.classList.add('selected');
+
+    const panel = document.getElementById('detailPanel');
+    const dateLabel = document.getElementById('detailDate');
+    const content = document.getElementById('detailContent');
+
+    // Format date nicely
+    const [y,m,d] = dateStr.split('-');
+    dateLabel.textContent = `📅 ${d} ${MONTHS_UZ[parseInt(m)-1]} ${y}`;
+
+    const dayBookings = bookings.filter(b => b.date === dateStr && b.status !== 'rejected');
+    const morningBook = dayBookings.find(b => b.slot === 'morning');
+    const eveningBook = dayBookings.find(b => b.slot === 'evening');
+
+    content.innerHTML = buildSlotRow('morning', '☀️', 'Ertalab', '09:00 – 15:00', morningBook)
+                      + buildSlotRow('evening', '🌙', 'Kechqurun', '17:00 – 23:00', eveningBook);
+
+    panel.classList.add('open');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function buildSlotRow(slot, icon, title, time, booking) {
+    if (!booking) {
+      return `
+      <div class="slot-row">
+        <div class="slot-icon">${icon}</div>
+        <div class="slot-info">
+          <div class="slot-title">${title}</div>
+          <div class="slot-time">${time}</div>
+          <span class="slot-badge badge-free">✅ Bo'sh</span>
+        </div>
+      </div>`;
+    }
+
+    const statusMap = {
+      pending:   { badge: 'badge-pending',   label: '⏳ Kutilmoqda' },
+      confirmed: { badge: 'badge-confirmed', label: '✅ Tasdiqlangan' },
+      rejected:  { badge: 'badge-rejected',  label: '❌ Rad etilgan' }
+    };
+    const s = statusMap[booking.status] || statusMap.pending;
+
+    return `
+    <div class="slot-row">
+      <div class="slot-icon">${icon}</div>
+      <div class="slot-info">
+        <div class="slot-title">${title}</div>
+        <div class="slot-time">${time}</div>
+        <span class="slot-badge ${s.badge}">${s.label}</span>
+        <div class="booking-mini">
+          <div class="booking-mini-name">👤 ${booking.name}</div>
+          <div class="booking-mini-detail">
+            📞 ${booking.phone}<br/>
+            🎊 ${EVENT_LABELS[booking.event] || booking.event}<br/>
+            👥 ${booking.guests} mehmon
+            ${booking.note && booking.note !== '—' ? '<br/>📝 ' + booking.note : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function closeDetail() {
+    document.getElementById('detailPanel').classList.remove('open');
+    document.querySelectorAll('.cal-day.selected').forEach(c => c.classList.remove('selected'));
+    selectedDate = null;
+  }
+
+  // ── Init ──
+  const now = new Date();
+  currentYear  = now.getFullYear();
+  currentMonth = now.getMonth();
+
+  // Check URL param
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('section') === 'offline') switchTab('offline');
+
+  fetchBookings();
+
+  // Auto-refresh har 30 soniyada
+  setInterval(fetchBookings, 30000);
+</script>
+</body>
+</html>
