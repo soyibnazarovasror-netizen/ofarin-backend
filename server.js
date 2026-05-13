@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 
 const TG_TOKEN   = process.env.TG_TOKEN;
 const TG_CHAT    = process.env.TG_CHAT;
-const MINIAPP_URL = process.env.MINIAPP_URL || `https://ofarin-backend.onrender.com/miniapp`;
+const MINIAPP_URL = process.env.MINIAPP_URL || `https://ofarin-backend-1.onrender.com/miniapp`;
 
 // ── Middleware ──────────────────────────────────────────
 app.use(cors());
