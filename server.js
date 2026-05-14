@@ -30,7 +30,13 @@ let contactsCol;
 
 async function connectDB() {
   try {
-    const client = new MongoClient(MONGODB_URI);
+    const client = new MongoClient(MONGODB_URI, {
+      tls: true,
+      tlsAllowInvalidCertificates: false,
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+      retryWrites: true,
+    });
     await client.connect();
     db = client.db('ofarin');
     bookingsCol = db.collection('bookings');
@@ -38,7 +44,9 @@ async function connectDB() {
     console.log('✅ MongoDB ga ulandi!');
   } catch(e) {
     console.error('❌ MongoDB ulanishda xatolik:', e.message);
-    process.exit(1);
+    // 5 soniyadan keyin qayta urinish
+    console.log('⏳ 5 soniyadan keyin qayta uriniladi...');
+    setTimeout(connectDB, 5000);
   }
 }
 
@@ -265,8 +273,7 @@ app.get('/health', (req, res) => {
 });
 
 // ── Start ───────────────────────────────────────────────
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`✅ Server ishlamoqda: http://localhost:${PORT}`);
-  });
+app.listen(PORT, () => {
+  console.log(`✅ Server ishlamoqda: http://localhost:${PORT}`);
 });
+connectDB();
