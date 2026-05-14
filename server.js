@@ -1,35 +1,50 @@
 // ===========================
 // OFARIN — server.js
-// Express + Telegram Bot
+// Express + Telegram Bot + MongoDB
 // ===========================
 
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
+const { MongoClient, ObjectId } = require('mongodb');
 const TelegramBot = require('node-telegram-bot-api');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-const TG_TOKEN   = process.env.TG_TOKEN;
-const TG_CHAT    = process.env.TG_CHAT;
-const MINIAPP_URL = process.env.MINIAPP_URL || `https://ofarin-backend-1.onrender.com/miniapp`;
+const TG_TOKEN    = process.env.TG_TOKEN;
+const TG_CHAT     = process.env.TG_CHAT;
+const MINIAPP_URL = process.env.MINIAPP_URL || 'https://ofarin-backend-1.onrender.com/miniapp';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // ── Middleware ──────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── In-memory storage (sodda, server restart bo'lsa tozalanadi)
-// Production uchun Firebase yoki MongoDB qo'shish mumkin
-let bookings = [];   // { id, name, phone, event, slot, date, guests, note, status, submitted }
-let offlineBookings = []; // keyinchalik
+// ── MongoDB connection ──────────────────────────────────
+let db;
+let bookingsCol;
+let contactsCol;
+
+async function connectDB() {
+  try {
+    const client = new MongoClient(MONGODB_URI);
+    await client.connect();
+    db = client.db('ofarin');
+    bookingsCol = db.collection('bookings');
+    contactsCol = db.collection('contacts');
+    console.log('✅ MongoDB ga ulandi!');
+  } catch(e) {
+    console.error('❌ MongoDB ulanishda xatolik:', e.message);
+    process.exit(1);
+  }
+}
 
 // ── Telegram Bot ────────────────────────────────────────
 const bot = new TelegramBot(TG_TOKEN, { polling: true });
 
-// /start komandasi
 bot.onText(/\/start/, (msg) => {
   if (String(msg.chat.id) !== String(TG_CHAT)) return;
   bot.sendMessage(TG_CHAT,
@@ -48,8 +63,7 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Menyu tugmalari
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   if (String(msg.chat.id) !== String(TG_CHAT)) return;
   const text = msg.text;
 
@@ -60,10 +74,7 @@ bot.on('message', (msg) => {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [[
-            {
-              text: '🗓 Kalendarni ochish',
-              web_app: { url: `${MINIAPP_URL}?section=online` }
-            }
+            { text: '🗓 Kalendarni ochish', web_app: { url: `${MINIAPP_URL}?section=online` } }
           ]]
         }
       }
@@ -78,10 +89,10 @@ bot.on('message', (msg) => {
   }
 
   if (text === '📊 Statistika') {
-    const total     = bookings.length;
-    const pending   = bookings.filter(b => b.status === 'pending').length;
-    const confirmed = bookings.filter(b => b.status === 'confirmed').length;
-    const rejected  = bookings.filter(b => b.status === 'rejected').length;
+    const total     = await bookingsCol.countDocuments();
+    const pending   = await bookingsCol.countDocuments({ status: 'pending' });
+    const confirmed = await bookingsCol.countDocuments({ status: 'confirmed' });
+    const rejected  = await bookingsCol.countDocuments({ status: 'rejected' });
 
     bot.sendMessage(TG_CHAT,
       `📊 <b>Statistika</b>\n\n` +
@@ -94,26 +105,26 @@ bot.on('message', (msg) => {
   }
 });
 
-// Inline tugma callback (tasdiqlash / rad etish)
+// Inline tugma callback
 bot.on('callback_query', async (query) => {
   if (String(query.message.chat.id) !== String(TG_CHAT)) return;
 
   const [action, bookingId] = query.data.split(':');
-  const booking = bookings.find(b => String(b.id) === String(bookingId));
+  if (action === 'done') { bot.answerCallbackQuery(query.id); return; }
 
+  const booking = await bookingsCol.findOne({ id: parseInt(bookingId) });
   if (!booking) {
     bot.answerCallbackQuery(query.id, { text: '⚠️ Bron topilmadi!' });
     return;
   }
 
   if (action === 'confirm') {
-    booking.status = 'confirmed';
+    await bookingsCol.updateOne({ id: parseInt(bookingId) }, { $set: { status: 'confirmed' } });
     bot.answerCallbackQuery(query.id, { text: '✅ Tasdiqlandi!' });
     bot.editMessageReplyMarkup(
       { inline_keyboard: [[{ text: '✅ TASDIQLANGAN', callback_data: 'done' }]] },
       { chat_id: TG_CHAT, message_id: query.message.message_id }
     );
-    // Tasdiqlash xabari
     bot.sendMessage(TG_CHAT,
       `✅ <b>${booking.name}</b> — <b>${booking.date}</b> (${booking.slot === 'morning' ? '☀️ Ertalab' : '🌙 Kechqurun'}) bron <b>tasdiqlandi!</b>`,
       { parse_mode: 'HTML' }
@@ -121,7 +132,7 @@ bot.on('callback_query', async (query) => {
   }
 
   if (action === 'reject') {
-    booking.status = 'rejected';
+    await bookingsCol.updateOne({ id: parseInt(bookingId) }, { $set: { status: 'rejected' } });
     bot.answerCallbackQuery(query.id, { text: '❌ Rad etildi!' });
     bot.editMessageReplyMarkup(
       { inline_keyboard: [[{ text: '❌ RAD ETILDI', callback_data: 'done' }]] },
@@ -136,7 +147,7 @@ bot.on('callback_query', async (query) => {
 
 // ── API Routes ──────────────────────────────────────────
 
-// Yangi bron qabul qilish (saytdan keladi)
+// Yangi bron (saytdan)
 app.post('/api/booking', async (req, res) => {
   const { name, phone, event, slot, date, guests, note } = req.body;
 
@@ -144,10 +155,10 @@ app.post('/api/booking', async (req, res) => {
     return res.status(400).json({ error: 'Majburiy maydonlar to\'ldirilmagan' });
   }
 
-  // Shu kun uchun slot band emasligini tekshirish
-  const conflict = bookings.find(
-    b => b.date === date && b.slot === slot && b.status !== 'rejected'
-  );
+  // Slot band emasligini tekshirish
+  const conflict = await bookingsCol.findOne({
+    date, slot, status: { $ne: 'rejected' }
+  });
   if (conflict) {
     return res.status(409).json({ error: 'Bu vaqt allaqachon band!' });
   }
@@ -160,7 +171,8 @@ app.post('/api/booking', async (req, res) => {
     status: 'pending',
     submitted: new Date().toISOString()
   };
-  bookings.push(booking);
+
+  await bookingsCol.insertOne(booking);
 
   const eventLabels = {
     wedding:  "💍 To'y / Wedding",
@@ -171,7 +183,6 @@ app.post('/api/booking', async (req, res) => {
   };
   const slotLabel = slot === 'morning' ? '☀️ Ertalab (09:00–15:00)' : '🌙 Kechqurun (17:00–23:00)';
 
-  // Telegram xabari
   const tgText =
 `🎉 <b>YANGI BRON SO'ROVI</b>
 🏛 Ofarin To'yxonasi
@@ -204,6 +215,8 @@ app.post('/api/contact', async (req, res) => {
     return res.status(400).json({ error: 'Barcha maydonlar to\'ldirilishi shart' });
   }
 
+  await contactsCol.insertOne({ name, phone, message, date: new Date().toISOString() });
+
   const tgText =
 `💬 <b>YANGI XABAR</b>
 🏛 Ofarin To'yxonasi
@@ -216,28 +229,44 @@ app.post('/api/contact', async (req, res) => {
   res.json({ success: true });
 });
 
-// Barcha bronlarni olish (Mini App uchun)
-app.get('/api/bookings', (req, res) => {
+// Barcha bronlar (Mini App + admin uchun)
+app.get('/api/bookings', async (req, res) => {
+  const bookings = await bookingsCol.find({}, { projection: { _id: 0 } }).toArray();
   res.json(bookings);
 });
 
 // Bronni yangilash (admin dashboard uchun)
-app.post('/api/booking/:id/status', (req, res) => {
+app.post('/api/booking/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-  const booking = bookings.find(b => String(b.id) === String(id));
-  if (!booking) return res.status(404).json({ error: 'Topilmadi' });
-  booking.status = status;
-  res.json({ success: true, booking });
+  const result = await bookingsCol.updateOne(
+    { id: parseInt(id) },
+    { $set: { status } }
+  );
+  if (result.matchedCount === 0) return res.status(404).json({ error: 'Topilmadi' });
+  res.json({ success: true });
 });
 
-// Mini App sahifasini yuborish
+// Bronni o'chirish
+app.delete('/api/booking/:id', async (req, res) => {
+  const { id } = req.params;
+  await bookingsCol.deleteOne({ id: parseInt(id) });
+  res.json({ success: true });
+});
+
+// Mini App
 app.get('/miniapp', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'miniapp.html'));
 });
 
-// ── Server ishga tushirish ──────────────────────────────
-app.listen(PORT, () => {
-  console.log(`✅ Ofarin server ishlamoqda: http://localhost:${PORT}`);
-  console.log(`📅 Mini App: http://localhost:${PORT}/miniapp`);
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', db: db ? 'connected' : 'disconnected' });
+});
+
+// ── Start ───────────────────────────────────────────────
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`✅ Server ishlamoqda: http://localhost:${PORT}`);
+  });
 });
