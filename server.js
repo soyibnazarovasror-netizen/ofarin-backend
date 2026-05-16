@@ -97,28 +97,138 @@ bot.on('message', async (msg) => {
   }
 
   if (text === '📊 Statistika') {
-    const total     = await bookingsCol.countDocuments();
-    const pending   = await bookingsCol.countDocuments({ status: 'pending' });
-    const confirmed = await bookingsCol.countDocuments({ status: 'confirmed' });
-    const rejected  = await bookingsCol.countDocuments({ status: 'rejected' });
-
-    bot.sendMessage(TG_CHAT,
-      `📊 <b>Statistika</b>\n\n` +
-      `📝 Jami: <b>${total}</b>\n` +
-      `⏳ Kutilmoqda: <b>${pending}</b>\n` +
-      `✅ Tasdiqlangan: <b>${confirmed}</b>\n` +
-      `❌ Rad etilgan: <b>${rejected}</b>`,
-      { parse_mode: 'HTML' }
-    );
+    await sendYearStats(null);
   }
 });
+
+// ── Statistika helper ──────────────────────────────────
+const MONTHS_UZ = ['Yanvar','Fevral','Mart','Aprel','May','Iyun','Iyul','Avgust','Sentabr','Oktabr','Noyabr','Dekabr'];
+const MONTH_EMOJI = ['❄️','💝','🌸','🌷','🌿','☀️','🌻','🏖','🍂','🎃','🍁','🎄'];
+
+function progressBar(count, max) {
+  const filled = max === 0 ? 0 : Math.round((count / max) * 8);
+  const empty  = 8 - filled;
+  return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+async function sendYearStats(msgId) {
+  const year = new Date().getFullYear();
+  const allBookings = await bookingsCol.find({ status: { $ne: 'rejected' } }).toArray();
+
+  // Count per month
+  const monthlyCounts = Array(12).fill(0);
+  allBookings.forEach(b => {
+    if (!b.date) return;
+    const m = parseInt(b.date.split('-')[1]) - 1;
+    const y = parseInt(b.date.split('-')[0]);
+    if (y === year) monthlyCounts[m]++;
+  });
+
+  const total = monthlyCounts.reduce((a, b) => a + b, 0);
+  const max   = Math.max(...monthlyCounts, 1);
+  const currentMonth = new Date().getMonth();
+
+  let text = `📊 <b>STATISTIKA — ${year}</b>\n`;
+  text += `<i>Tasdiqlangan va kutilayotgan bronlar</i>\n\n`;
+
+  monthlyCounts.forEach((count, i) => {
+    const bar     = progressBar(count, max);
+    const emoji   = MONTH_EMOJI[i];
+    const name    = MONTHS_UZ[i].padEnd(9, ' ');
+    const current = i === currentMonth ? ' ◄' : '';
+    text += `${emoji} <code>${name}</code> <code>${bar}</code>  <b>${count}</b>${current}\n`;
+  });
+
+  text += `\n──────────────────\n`;
+  text += `📅 Jami bronlar: <b>${total}</b>\n`;
+  text += `📆 Yil: <b>${year}</b>`;
+
+  // Year selector + next/prev year buttons
+  const inline_keyboard = [
+    [
+      { text: `◀ ${year-1}`, callback_data: `stats_year:${year-1}` },
+      { text: `${year} ✦`,   callback_data: `stats_year:${year}`   },
+      { text: `${year+1} ▶`, callback_data: `stats_year:${year+1}` }
+    ]
+  ];
+
+  if (msgId) {
+    await bot.editMessageText(text, {
+      chat_id: TG_CHAT, message_id: msgId,
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard }
+    });
+  } else {
+    await bot.sendMessage(TG_CHAT, text, {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard }
+    });
+  }
+}
+
+async function sendYearStatsByYear(year, msgId) {
+  const allBookings = await bookingsCol.find({ status: { $ne: 'rejected' } }).toArray();
+
+  const monthlyCounts = Array(12).fill(0);
+  allBookings.forEach(b => {
+    if (!b.date) return;
+    const m = parseInt(b.date.split('-')[1]) - 1;
+    const y = parseInt(b.date.split('-')[0]);
+    if (y === year) monthlyCounts[m]++;
+  });
+
+  const total = monthlyCounts.reduce((a, b) => a + b, 0);
+  const max   = Math.max(...monthlyCounts, 1);
+  const currentYear  = new Date().getFullYear();
+  const currentMonth = new Date().getMonth();
+
+  let text = `📊 <b>STATISTIKA — ${year}</b>\n`;
+  text += `<i>Tasdiqlangan va kutilayotgan bronlar</i>\n\n`;
+
+  monthlyCounts.forEach((count, i) => {
+    const bar     = progressBar(count, max);
+    const emoji   = MONTH_EMOJI[i];
+    const name    = MONTHS_UZ[i].padEnd(9, ' ');
+    const current = (year === currentYear && i === currentMonth) ? ' ◄' : '';
+    text += `${emoji} <code>${name}</code> <code>${bar}</code>  <b>${count}</b>${current}\n`;
+  });
+
+  text += `\n──────────────────\n`;
+  text += `📅 Jami bronlar: <b>${total}</b>\n`;
+  text += `📆 Yil: <b>${year}</b>`;
+
+  const inline_keyboard = [
+    [
+      { text: `◀ ${year-1}`, callback_data: `stats_year:${year-1}` },
+      { text: `${year} ✦`,   callback_data: `stats_year:${year}`   },
+      { text: `${year+1} ▶`, callback_data: `stats_year:${year+1}` }
+    ]
+  ];
+
+  await bot.editMessageText(text, {
+    chat_id: TG_CHAT, message_id: msgId,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard }
+  });
+}
 
 // Inline tugma callback
 bot.on('callback_query', async (query) => {
   if (String(query.message.chat.id) !== String(TG_CHAT)) return;
 
-  const [action, bookingId] = query.data.split(':');
+  const [action, param] = query.data.split(':');
+
+  // Stats year navigation
+  if (action === 'stats_year') {
+    const year = parseInt(param);
+    await bot.answerCallbackQuery(query.id);
+    await sendYearStatsByYear(year, query.message.message_id);
+    return;
+  }
+
   if (action === 'done') { bot.answerCallbackQuery(query.id); return; }
+
+  const bookingId = param;
 
   const booking = await bookingsCol.findOne({ id: parseInt(bookingId) });
   if (!booking) {
