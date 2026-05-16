@@ -143,13 +143,30 @@ async function sendYearStats(msgId) {
   text += `📅 Jami bronlar: <b>${total}</b>\n`;
   text += `📆 Yil: <b>${year}</b>`;
 
-  // Year selector + next/prev year buttons
+  // Month buttons (3 columns x 4 rows)
+  const monthButtons = [];
+  for (let row = 0; row < 4; row++) {
+    const rowBtns = [];
+    for (let col = 0; col < 3; col++) {
+      const i = row * 3 + col;
+      const cnt = monthlyCounts[i];
+      const isCurrent = i === currentMonth;
+      const label = isCurrent
+        ? `${MONTH_EMOJI[i]} ${MONTHS_UZ[i]} (${cnt}) ◄`
+        : `${MONTH_EMOJI[i]} ${MONTHS_UZ[i]} (${cnt})`;
+      rowBtns.push({ text: label, callback_data: `stats_month:${year}:${i}` });
+    }
+    monthButtons.push(rowBtns);
+  }
+
+  // Year nav row
   const inline_keyboard = [
     [
       { text: `◀ ${year-1}`, callback_data: `stats_year:${year-1}` },
       { text: `${year} ✦`,   callback_data: `stats_year:${year}`   },
       { text: `${year+1} ▶`, callback_data: `stats_year:${year+1}` }
-    ]
+    ],
+    ...monthButtons
   ];
 
   if (msgId) {
@@ -197,16 +214,120 @@ async function sendYearStatsByYear(year, msgId) {
   text += `📅 Jami bronlar: <b>${total}</b>\n`;
   text += `📆 Yil: <b>${year}</b>`;
 
+  // Month buttons
+  const monthButtons = [];
+  for (let row = 0; row < 4; row++) {
+    const rowBtns = [];
+    for (let col = 0; col < 3; col++) {
+      const i = row * 3 + col;
+      const cnt = monthlyCounts[i];
+      const isCur = (year === currentYear && i === currentMonth);
+      const label = isCur
+        ? `${MONTH_EMOJI[i]} ${MONTHS_UZ[i]} (${cnt}) ◄`
+        : `${MONTH_EMOJI[i]} ${MONTHS_UZ[i]} (${cnt})`;
+      rowBtns.push({ text: label, callback_data: `stats_month:${year}:${i}` });
+    }
+    monthButtons.push(rowBtns);
+  }
+
   const inline_keyboard = [
     [
       { text: `◀ ${year-1}`, callback_data: `stats_year:${year-1}` },
       { text: `${year} ✦`,   callback_data: `stats_year:${year}`   },
       { text: `${year+1} ▶`, callback_data: `stats_year:${year+1}` }
-    ]
+    ],
+    ...monthButtons
   ];
 
   await bot.editMessageText(text, {
     chat_id: TG_CHAT, message_id: msgId,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard }
+  });
+}
+
+
+// ── Oy detali ──────────────────────────────────────────
+const EVENT_LABELS = {
+  wedding:  "💍 To'y",
+  birthday: "🎂 Tug'ilgan kun",
+  yubiley:  "🌟 Yubiley",
+  haj:      "🕌 Haj To'yi",
+  banket:   "🥂 Banket"
+};
+
+async function sendMonthDetail(year, monthIndex, msgId) {
+  const monthStr = String(monthIndex + 1).padStart(2, '0');
+  const prefix   = `${year}-${monthStr}`;
+
+  const bookings = await bookingsCol.find({
+    date: { $regex: `^${prefix}` },
+    status: { $ne: 'rejected' }
+  }).sort({ date: 1, slot: 1 }).toArray();
+
+  const monthName  = MONTHS_UZ[monthIndex];
+  const monthEmoji = MONTH_EMOJI[monthIndex];
+
+  let text = `${monthEmoji} <b>${monthName} ${year}</b>
+`;
+
+  if (bookings.length === 0) {
+    text += `
+<i>Bu oyda hali bron yo'q.</i>`;
+  } else {
+    text += `<i>${bookings.length} ta bron</i>
+`;
+    text += `━━━━━━━━━━━━━━━━━━━━
+
+`;
+
+    // Group by date
+    const byDate = {};
+    bookings.forEach(b => {
+      if (!byDate[b.date]) byDate[b.date] = [];
+      byDate[b.date].push(b);
+    });
+
+    Object.keys(byDate).sort().forEach(date => {
+      const day = parseInt(date.split('-')[2]);
+      const dayBookings = byDate[date];
+
+      // Day header
+      text += `📅 <b>${day}-${monthName}</b>
+`;
+
+      dayBookings.forEach(b => {
+        const slotIcon  = b.slot === 'morning' ? '☀️' : '🌙';
+        const slotTime  = b.slot === 'morning' ? '09:00–15:00' : '17:00–23:00';
+        const eventName = EVENT_LABELS[b.event] || b.event;
+        const statusIcon = b.status === 'confirmed' ? '✅' : '⏳';
+
+        text += `  ${slotIcon} <code>${slotTime}</code>
+`;
+        text += `  ${statusIcon} ${eventName}
+`;
+        text += `  👤 ${b.name} · 📞 ${b.phone}
+`;
+        if (b.guests && b.guests !== '—') {
+          text += `  👥 ${b.guests} mehmon
+`;
+        }
+        text += `
+`;
+      });
+
+      text += `─────────────────────
+`;
+    });
+  }
+
+  const inline_keyboard = [
+    [{ text: '◀ Ortga — Statistika', callback_data: `stats_year:${year}` }]
+  ];
+
+  await bot.editMessageText(text, {
+    chat_id: TG_CHAT,
+    message_id: msgId,
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard }
   });
@@ -223,6 +344,16 @@ bot.on('callback_query', async (query) => {
     const year = parseInt(param);
     await bot.answerCallbackQuery(query.id);
     await sendYearStatsByYear(year, query.message.message_id);
+    return;
+  }
+
+  // Stats month detail
+  if (action === 'stats_month') {
+    const [yearStr, monthStr] = query.data.split(':').slice(1);
+    const year       = parseInt(yearStr);
+    const monthIndex = parseInt(monthStr);
+    await bot.answerCallbackQuery(query.id);
+    await sendMonthDetail(year, monthIndex, query.message.message_id);
     return;
   }
 
